@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
 
   app:
-    image: nginx:1.27-alpine
+    image: nginx:1.29.8-alpine-slim
     expose:
       - "80"
     restart: unless-stopped

@@ -26,8 +26,8 @@
 # Ferron to apply changes without rebuilding the image.
 #
 # Override image names/tags with a .env file or environment:
-#   FERRON_IMAGE=ghcr.io/you/ferron:3.0.0-rc.6-alpine
-#   FERRON_INIT_IMAGE=ghcr.io/you/ferron:3.0.0-rc.6-init
+#   FERRON_IMAGE=ghcr.io/you/ferron:3.0.0-rc.10-alpine
+#   FERRON_INIT_IMAGE=ghcr.io/you/ferron:3.0.0-rc.10-init
 
 name: ferron
 
@@ -68,7 +68,7 @@ services:
   # Your application. It must NOT publish ports; Ferron reaches it over the
   # compose network by service name. Replace with your real workload image.
   app:
-    image: nginx:1.27-alpine
+    image: nginx:1.29.8-alpine-slim
     expose:
       - "80"
     restart: unless-stopped

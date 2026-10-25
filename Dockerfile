@@ -2,10 +2,10 @@
 
 # Build Ferron and its companion tools against a musl sysroot. The upstream
 # revision matches the Ferron git dependencies in crates/*/Cargo.toml.
-FROM rust:slim AS builder
+FROM rust:1.99.1-slim-trixie AS builder
 
 ARG TARGETARCH
-ARG FERRON_REV=4c332d71545bea7076efc6d93ce4b42620475c43
+ARG FERRON_REV=eabdbdc2079e5c92a80c4cdb324a8d2d6094cc6d
 
 RUN sed -i 's|http://deb.debian.org/debian$|http://ftp.hk.debian.org/debian|' /etc/apt/sources.list.d/debian.sources && \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -42,7 +42,7 @@ RUN --mount=type=cache,id=ferron-cargo-registry,target=/usr/local/cargo/registry
     bash docker/build-musl.sh "${target}" "/opt/sysroots/musl-${target}" /out
 
 # Small runtime with the sqlite3 CLI for inspecting the definitions database.
-FROM alpine:3.24 AS runtime-alpine
+FROM alpine:3.24.3 AS runtime-alpine
 RUN apk add --no-cache ca-certificates sqlite && \
     addgroup -S -g 65532 ferron && adduser -S -D -H -u 65532 -G ferron ferron && \
     mkdir -p /etc/ferron /var/lib/ferron /var/log/ferron /var/www/static /var/cache/ferron-acme && \
@@ -54,7 +54,7 @@ ENTRYPOINT ["/usr/local/bin/ferron"]
 CMD ["run", "--config", "/etc/ferron/ferron.conf"]
 
 # Static binaries also work in a minimal runtime without a shell.
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime-distroless
+FROM gcr.io/distroless/static-debian13:nonroot AS runtime-distroless
 COPY --from=builder /out/ferron /out/ferron-fmt /out/ferron-kdl2ferron /out/ferron-passwd /out/ferron-precompress /out/ferron-serve /usr/local/bin/
 COPY --from=runtime-alpine /etc/ferron /etc/ferron
 COPY --from=runtime-alpine /var/www/static /var/www/static
@@ -67,7 +67,7 @@ ENTRYPOINT ["/usr/local/bin/ferron"]
 CMD ["run", "--config", "/etc/ferron/ferron.conf"]
 
 # One-shot schema initializer; sqlite3 also lets operators manage DB rows.
-FROM alpine:3.24 AS definitions-init
+FROM alpine:3.24.3 AS definitions-init
 RUN apk add --no-cache sqlite && mkdir -p /var/lib/ferron
 COPY --from=builder /out/abuse-definitions-init /usr/local/bin/abuse-definitions-init
 ENTRYPOINT ["/usr/local/bin/abuse-definitions-init"]
