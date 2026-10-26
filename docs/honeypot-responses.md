@@ -166,12 +166,12 @@ format recognizable retain their actual provider names.
 
 ### Definition data
 
-`docs/database/attack-definitions-snapshot-v1.sql` is the canonical, complete
+`definitions/docs/database/attack-definitions-snapshot-v1.sql` is the canonical, complete
 definition snapshot. It includes the current accumulated honeypot decoys and
 ban-only probes. Install it into a new SQLite database rather than applying it
 to an existing definitions database. Deploy all matching
-`honeypot-responses/id-leak-*.yaml` files with the database before enabling
+`definitions/honeypot-responses/id-leak-*.yaml` files with the database before enabling
 honeypot mode. Snapshot integration coverage lives in
-`crates/abuse-core/tests/cases/snapshot-v1.yml`; common application routes,
+`definitions/tests/cases/snapshot-v1.yml`; common application routes,
 `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`, and random PHP filenames
-remain unmatched. See [`database/README.md`](database/README.md).
+remain unmatched. See [`definitions/docs/database/README.md`](../definitions/docs/database/README.md).

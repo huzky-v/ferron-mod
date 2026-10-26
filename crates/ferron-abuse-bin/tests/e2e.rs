@@ -190,7 +190,7 @@ fn insert_test_definitions(connection: &Connection) {
 fn default_templates(directory: &Path) {
     fs::create_dir(directory).unwrap();
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../honeypot-responses/id-leak-google-credentials.yaml");
+        .join("../../definitions/honeypot-responses/id-leak-google-credentials.yaml");
     let yaml = fs::read_to_string(source).unwrap().replace(
         "name: id-leak-google-credentials",
         &format!("name: {DECOY_NAME}"),

@@ -1,8 +1,0 @@
-version: 1
-name: id-leak-doctl-config
-restype: json
-variables:
-  token: {op: chars, alphabet: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789, min: 64}
-fields:
-  access-token: '${token}'
-  context: default

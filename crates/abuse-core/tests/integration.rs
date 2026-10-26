@@ -50,7 +50,7 @@ fn catalog(snapshot: &DefinitionSnapshot) -> Arc<TemplateCatalog> {
     let directory = tempdir().unwrap();
     let sources = Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../honeypot-responses"
+        "/../../definitions/honeypot-responses"
     ));
     for entry in snapshot.definitions() {
         if entry.definition().attack_type == AttackType::IdLeak {
@@ -80,7 +80,7 @@ fn insert_test_definitions(connection: &Connection) {
 #[test]
 fn snapshot_cases_from_yaml() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let cases_dir = root.join("tests/cases");
+    let cases_dir = root.join("../../definitions/tests/cases");
     let mut paths: Vec<PathBuf> = std::fs::read_dir(&cases_dir)
         .unwrap_or_else(|error| panic!("{}: {error}", cases_dir.display()))
         .map(|entry| entry.unwrap().path())
@@ -102,7 +102,7 @@ fn snapshot_cases_from_yaml() {
         let db = directory.path().join("definitions.sqlite");
         let connection = Connection::open(&db).unwrap();
         for migration in &fixture.migrations {
-            let source = root.join(migration);
+            let source = path.parent().unwrap().join(migration);
             let sql = std::fs::read_to_string(&source).unwrap_or_else(|error| {
                 panic!("{}: migration {migration}: {error}", path.display())
             });

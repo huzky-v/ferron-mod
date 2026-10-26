@@ -1,0 +1,22 @@
+name: Test Ferron implementation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal --component clippy,rustfmt && rustup default 1.99.1
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test against pinned definitions
+        run: cargo test --workspace

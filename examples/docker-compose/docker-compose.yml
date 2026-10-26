@@ -15,7 +15,7 @@
 #     /var/lib/ferron/attack-definitions.sqlite \
 #     "INSERT INTO attack_definitions (name,field,matcher,pattern,attack_type,created_at,updated_at) VALUES ('id-leak-dotenv','path','exact','/.env','id_leak','now','now');"
 #   mkdir -p honeypot-responses
-#   cp ../../honeypot-responses/id-leak-dotenv.yaml honeypot-responses/
+#   cp ../../definitions/honeypot-responses/id-leak-dotenv.yaml honeypot-responses/
 #   docker compose up -d
 # The init job only creates the schema; an empty database has no detection rules.
 # Provision your DB rows and matching templates before starting Ferron. The

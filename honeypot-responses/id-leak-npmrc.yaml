@@ -1,9 +1,0 @@
-version: 1
-name: id-leak-npmrc
-restype: normal
-variables:
-  token: {op: chars, alphabet: '0123456789abcdef', min: 40}
-template: |
-  registry=https://registry.npmjs.org/
-  always-auth=true
-  //registry.npmjs.org/:_authToken=${token}

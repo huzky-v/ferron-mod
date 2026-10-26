@@ -1,7 +1,0 @@
-version: 1
-name: id-leak-rails-master-key
-restype: normal
-variables:
-  key: {op: chars, alphabet: '0123456789abcdef', min: 32}
-template: |
-  ${key}

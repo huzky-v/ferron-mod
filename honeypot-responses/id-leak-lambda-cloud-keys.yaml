@@ -1,9 +1,0 @@
-version: 1
-name: id-leak-lambda-cloud-keys
-restype: normal
-variables:
-  access: {op: chars, alphabet: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789, min: 32}
-  secret: {op: chars, alphabet: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789, min: 48}
-template: |
-  LAMBDA_CLOUD_ACCESS_KEY=${access}
-  LAMBDA_CLOUD_SECRET_KEY=${secret}

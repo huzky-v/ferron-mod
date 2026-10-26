@@ -1,7 +1,0 @@
-version: 1
-name: id-leak-private-key-pem
-restype: normal
-variables:
-  pem: {op: pkcs8_rsa_pem}
-template: |
-  ${pem}
