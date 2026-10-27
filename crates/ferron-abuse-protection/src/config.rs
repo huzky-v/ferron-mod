@@ -16,7 +16,9 @@ pub struct IpBanConfig {
 }
 
 pub fn ipban_only(block: &ServerConfigurationBlock) -> bool {
-    block.get_value("ipban_mode").and_then(|v| v.as_boolean()) == Some(true)
+    (block.get_value("ipban_mode").and_then(|v| v.as_boolean()) == Some(true)
+        || block.has_directive("geo_mode")
+        || block.has_directive("geo_database"))
         && !block.has_directive("ban_mode")
         && !block.has_directive("honeypot_mode")
 }
@@ -26,7 +28,21 @@ pub(crate) fn validate_ipban_only(block: &ServerConfigurationBlock) -> Result<()
         DIRECTIVES.contains(&name.as_str())
             && !matches!(
                 name.as_str(),
-                "ipban_mode" | "ipban_url" | "ipban_interval" | "ipban_log" | "proxied_by"
+                "ipban_mode"
+                    | "ipban_url"
+                    | "ipban_interval"
+                    | "ipban_log"
+                    | "proxied_by"
+                    | "geo_mode"
+                    | "geo_database"
+                    | "geo_asn_database"
+                    | "geo_url"
+                    | "geo_asn_url"
+                    | "geo_interval"
+                    | "geo_block_asn"
+                    | "geo_block_country"
+                    | "geo_block_continent"
+                    | "geo_log"
             )
     }) {
         return Err(format!(
@@ -95,6 +111,16 @@ pub const DIRECTIVES: &[&str] = &[
     "ipban_url",
     "ipban_interval",
     "ipban_log",
+    "geo_mode",
+    "geo_database",
+    "geo_asn_database",
+    "geo_url",
+    "geo_asn_url",
+    "geo_interval",
+    "geo_block_asn",
+    "geo_block_country",
+    "geo_block_continent",
+    "geo_log",
 ];
 pub const SITE_DIRECTIVES: &[&str] = &[
     "ban_mode",
@@ -105,6 +131,11 @@ pub const SITE_DIRECTIVES: &[&str] = &[
     "audit_log",
     "matched_log",
     "share_bans",
+    "geo_mode",
+    "geo_block_asn",
+    "geo_block_country",
+    "geo_block_continent",
+    "geo_log",
 ];
 pub const LEGACY_DIRECTIVES: &[&str] = &[
     "abuse_protection",
@@ -276,6 +307,7 @@ impl ConfigurationValidator for AbuseProtectionConfigurationValidator {
         let bundle = bundle_value(config)?;
         proxied_by(config).map_err(ConfigurationValidationError::from)?;
         extract_ipban_config(config).map_err(ConfigurationValidationError::from)?;
+        crate::geo::validate(config).map_err(ConfigurationValidationError::from)?;
         if ipban_only(config) {
             validate_ipban_only(config).map_err(ConfigurationValidationError::from)?;
             return Ok(());
@@ -384,7 +416,7 @@ fn validate_site_directive(
     name: &str,
 ) -> Result<(), ConfigurationValidationError> {
     match name {
-        "ban_mode" | "honeypot_mode" | "share_bans" | "wordpress_site" => {
+        "ban_mode" | "honeypot_mode" | "share_bans" | "wordpress_site" | "geo_mode" => {
             validate_bool(block, name)
         }
         "ban_duration" => required_duration(block, name)
@@ -393,9 +425,12 @@ fn validate_site_directive(
         "ban_extensions" => ban_extensions(block)
             .map(|_| ())
             .map_err(ConfigurationValidationError::from),
-        "audit_log" | "matched_log" => required_path(block, name)
+        "audit_log" | "matched_log" | "geo_log" => required_path(block, name)
             .map(|_| ())
             .map_err(ConfigurationValidationError::from),
+        "geo_block_asn" | "geo_block_country" | "geo_block_continent" => {
+            crate::geo::validate_list(block, name).map_err(ConfigurationValidationError::from)
+        }
         _ => unreachable!(),
     }
 }

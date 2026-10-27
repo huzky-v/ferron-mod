@@ -73,6 +73,7 @@ pub struct SharedState {
     pub cloudflare_ranges: Option<Vec<abuse_core::IpCidr>>,
     pub ipban: Option<Arc<IpBanState>>,
     pub standalone_ipban: bool,
+    pub geo: Option<Arc<crate::geo::GeoState>>,
 }
 
 impl SharedState {
@@ -318,6 +319,52 @@ impl ModuleLoader for FerronAbuseProtectionModuleLoader {
                 "ipban_log <path>",
                 "Dedicated Apache-format blocked-request log; required when ipban_mode is true.",
             ),
+            (
+                "geo_mode",
+                "geo_mode <bool>",
+                "Enable ASN and country filtering.",
+            ),
+            (
+                "geo_database",
+                "geo_database <path>",
+                "Global GeoLite2 country database path.",
+            ),
+            (
+                "geo_asn_database",
+                "geo_asn_database <path>",
+                "Global GeoLite2 ASN database path.",
+            ),
+            (
+                "geo_url",
+                "geo_url <https-url>",
+                "Country database download URL.",
+            ),
+            (
+                "geo_asn_url",
+                "geo_asn_url <https-url>",
+                "ASN database download URL.",
+            ),
+            (
+                "geo_interval",
+                "geo_interval <duration>",
+                "Database refresh interval (default 7d).",
+            ),
+            (
+                "geo_block_asn",
+                "geo_block_asn <asn> [asn ...]",
+                "Blocked ASN numbers.",
+            ),
+            (
+                "geo_block_country",
+                "geo_block_country <code> [code ...]",
+                "Blocked country codes.",
+            ),
+            (
+                "geo_block_continent",
+                "geo_block_continent <code> [code ...]",
+                "Blocked continent codes.",
+            ),
+            ("geo_log", "geo_log <path>", "Geo filtering log."),
         ] {
             registry.register(
                 Directive {
@@ -389,6 +436,11 @@ impl ModuleLoader for FerronAbuseProtectionModuleLoader {
                     named_hosts.insert(host.to_ascii_lowercase());
                 }
                 reject_nested_abuse_settings(block)?;
+                if block.get_value("geo_mode").and_then(|v| v.as_boolean()) == Some(true)
+                    && !config.global_config.has_directive("geo_database")
+                {
+                    return Err("geo_mode requires global geo_database and geo_asn_database".into());
+                }
                 if adapter.cloudflare && block.has_directive("client_ip_from_header") {
                     return Err(
                         "`proxied_by cloudflare` cannot be combined with `client_ip_from_header`"
@@ -521,6 +573,7 @@ impl ModuleLoader for FerronAbuseProtectionModuleLoader {
             cloudflare_ranges,
             ipban,
             standalone_ipban: false,
+            geo: crate::geo::GeoState::new(&config.global_config)?.map(Arc::new),
         });
         self.state
             .set(state)
@@ -559,7 +612,7 @@ impl FerronAbuseProtectionModuleLoader {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let global = &config.global_config;
         validate_ipban_only(global)?;
-        let ipban = extract_ipban_config(global)?.ok_or("ipban_mode must be enabled")?;
+        let ipban = extract_ipban_config(global)?;
         let cloudflare = proxied_by(global)?;
         if cloudflare && global.has_directive("client_ip_from_header") {
             return Err(
@@ -573,11 +626,22 @@ impl FerronAbuseProtectionModuleLoader {
                     named_hosts.insert(host.to_ascii_lowercase());
                 }
                 reject_nested_abuse_settings(block)?;
-                if let Some(name) = block
-                    .directives
-                    .keys()
-                    .find(|name| DIRECTIVES.contains(&name.as_str()))
+                if block.get_value("geo_mode").and_then(|v| v.as_boolean()) == Some(true)
+                    && !global.has_directive("geo_database")
                 {
+                    return Err("geo_mode requires global geo_database and geo_asn_database".into());
+                }
+                if let Some(name) = block.directives.keys().find(|name| {
+                    DIRECTIVES.contains(&name.as_str())
+                        && ![
+                            "geo_mode",
+                            "geo_block_asn",
+                            "geo_block_country",
+                            "geo_block_continent",
+                            "geo_log",
+                        ]
+                        .contains(&name.as_str())
+                }) {
                     return Err(format!(
                         "`{name}` requires the existing protection configuration or is global-only"
                     )
@@ -617,11 +681,15 @@ impl FerronAbuseProtectionModuleLoader {
             sites: Mutex::new(HashMap::new()),
             named_hosts,
             cloudflare_ranges,
-            ipban: Some(Arc::new(IpBanState::new(
-                ipban.clone(),
-                open_audit_file(&ipban.log)?,
-            ))),
+            ipban: ipban
+                .as_ref()
+                .map(|settings| {
+                    open_audit_file(&settings.log)
+                        .map(|file| Arc::new(IpBanState::new(settings.clone(), file)))
+                })
+                .transpose()?,
             standalone_ipban: true,
+            geo: crate::geo::GeoState::new(global)?.map(Arc::new),
         });
         self.state
             .set(state)
@@ -703,11 +771,30 @@ impl ferron_core::Module for AbuseProtectionModule {
                 }
             });
         }
+        if let Some(geo) = &state.geo {
+            let refresh = Arc::clone(geo);
+            let shutdown = ferron_core::shutdown::SHUTDOWN_TOKEN.load_full();
+            runtime.spawn_secondary_task(async move {
+                loop {
+                    let worker = Arc::clone(&refresh);
+                    let result = tokio::select! { _ = shutdown.cancelled() => break, result = tokio::task::spawn_blocking(move || worker.fetch()) => result };
+                    let delay = match result {
+                        Ok(Ok(())) => refresh.interval,
+                        error => { ferron_core::log_warn!("ferron geo refresh failed: {:?}", error); std::cmp::min(refresh.interval, std::time::Duration::from_secs(300)) }
+                    };
+                    tokio::select! { _ = shutdown.cancelled() => break, _ = tokio::time::sleep(delay) => {} }
+                }
+            });
+        }
         let writer_state = Arc::clone(&state);
         let shutdown = ferron_core::shutdown::SHUTDOWN_TOKEN.load_full();
         runtime.spawn_secondary_task(async move {
             tokio::select! {
                 _ = shutdown.cancelled() => {
+                    if let Some(geo) = &writer_state.geo {
+                        let logs = std::mem::take(&mut *geo.logs.lock().unwrap());
+                        for (_, writer) in logs { let _ = tokio::task::spawn_blocking(move || writer.shutdown_and_join()).await; }
+                    }
                     if let Some(ipban) = &writer_state.ipban {
                         let writer = ipban.log.lock().unwrap().take();
                         if let Some(writer) = writer {
@@ -768,7 +855,7 @@ fn spawn_audit_writer(
     })?)
 }
 
-fn open_audit_file(path: &std::path::Path) -> io::Result<File> {
+pub(crate) fn open_audit_file(path: &std::path::Path) -> io::Result<File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;

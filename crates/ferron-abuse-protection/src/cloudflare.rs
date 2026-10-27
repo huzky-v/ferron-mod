@@ -221,6 +221,7 @@ mod tests {
                 cloudflare_ranges: Some(parse_ranges("172.64.0.0/13\n", true).unwrap()),
                 ipban: None,
                 standalone_ipban: false,
+                geo: None,
             }))
             .ok()
             .unwrap();

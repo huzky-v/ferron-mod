@@ -3,15 +3,14 @@ use ferron_core::config::ServerConfigurationHostFilters;
 
 pub(crate) fn add_abuse_catch_all(config: &mut ServerConfiguration) {
     let global = &config.global_config;
-    let protection_enabled =
-        ["ban_mode", "honeypot_mode", "ipban_mode"]
-            .into_iter()
-            .any(|directive| {
-                global
-                    .get_value(directive)
-                    .and_then(|value| value.as_boolean())
-                    == Some(true)
-            });
+    let protection_enabled = ["ban_mode", "honeypot_mode", "ipban_mode", "geo_mode"]
+        .into_iter()
+        .any(|directive| {
+            global
+                .get_value(directive)
+                .and_then(|value| value.as_boolean())
+                == Some(true)
+        });
     if !protection_enabled {
         return;
     }

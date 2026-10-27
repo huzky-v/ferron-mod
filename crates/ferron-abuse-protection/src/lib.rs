@@ -3,6 +3,7 @@ mod cloudflare;
 mod config;
 mod config_adapter;
 mod definition_source;
+mod geo;
 mod ipban;
 mod matched_log;
 mod module;

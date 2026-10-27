@@ -70,6 +70,7 @@ impl Stage<HttpContext> for AbuseProtectionStage {
                 || block.has_directive("definitions_bundle")
                 || block.has_directive("honeypot_templates_dir")
                 || block.has_directive("ipban_mode")
+                || block.has_directive("geo_mode")
         })
     }
 
@@ -92,6 +93,46 @@ impl Stage<HttpContext> for AbuseProtectionStage {
             Some(site) => site.policy.as_ref(),
             None => state.policy.as_ref(),
         };
+        if let Some(geo) = &state.geo
+            && let Some(ip) = context.remote_address.map(|a| a.ip().to_canonical())
+            && !state
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.is_allowlisted(ip))
+        {
+            let rules =
+                crate::geo::rules(&context.configuration.layers).map_err(PipelineError::custom)?;
+            if let Some(reason) = geo.matches(ip, &rules) {
+                if let Some(path) = &rules.log {
+                    let mut logs = geo.logs.lock().unwrap();
+                    if !logs.contains_key(path) {
+                        match crate::module::open_audit_file(path)
+                            .and_then(matched_log::MatchedLog::spawn)
+                        {
+                            Ok(writer) => {
+                                logs.insert(path.clone(), writer);
+                            }
+                            Err(error) => ferron_core::log_warn!("geo log open failed: {}", error),
+                        }
+                    }
+                    if let Some(writer) = logs.get(path) {
+                        writer.record(matched_log::format_line(
+                            context,
+                            SystemTime::now(),
+                            403,
+                            &reason,
+                        ));
+                    }
+                }
+                fail2ban_response(
+                    context,
+                    403,
+                    abuse_core::Fail2banPolicy::default().retry_after.as_secs(),
+                )
+                .map_err(|e| PipelineError::custom(e.to_string()))?;
+                return Ok(false);
+            }
+        }
         if let Some(ipban) = &state.ipban
             && let Some(ip) = context
                 .remote_address
@@ -374,6 +415,7 @@ mod tests {
             cloudflare_ranges: None,
             ipban: Some(Arc::clone(&ipban)),
             standalone_ipban: true,
+            geo: None,
         });
         let stage_state = Arc::new(OnceLock::new());
         stage_state.set(state).ok().unwrap();
@@ -453,6 +495,7 @@ mod tests {
             cloudflare_ranges: None,
             ipban: None,
             standalone_ipban: false,
+            geo: None,
         };
         let captured = std::sync::Arc::new(Mutex::new(Vec::new()));
         let mut context = HttpContext::default();

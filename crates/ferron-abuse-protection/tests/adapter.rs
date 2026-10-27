@@ -620,7 +620,8 @@ fn rejects_legacy_abuse_configuration() {
 
 #[test]
 fn stage_has_early_ordering_and_only_expected_directives_are_owned() {
-    assert_eq!(DIRECTIVES.len(), 17);
+    assert_eq!(DIRECTIVES.len(), 27);
+    assert!(DIRECTIVES.contains(&"geo_mode"));
     assert!(DIRECTIVES.contains(&"wordpress_site"));
     assert!(DIRECTIVES.contains(&"share_bans"));
     assert!(DIRECTIVES.contains(&"matched_log"));

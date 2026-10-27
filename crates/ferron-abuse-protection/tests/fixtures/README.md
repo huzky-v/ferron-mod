@@ -1,0 +1,1 @@
+The GeoIP2-Country-Test.mmdb and GeoLite2-ASN-Test.mmdb fixtures come from the MaxMind-DB project: https://github.com/maxmind/MaxMind-DB/tree/main/test-data. They contain synthetic test records and are distributed by MaxMind under the Creative Commons CC0 1.0 Universal dedication.
