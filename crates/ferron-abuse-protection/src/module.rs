@@ -381,6 +381,9 @@ impl ModuleLoader for FerronAbuseProtectionModuleLoader {
     }
 
     fn register_stages(&mut self, registry: RegistryBuilder) -> RegistryBuilder {
+        let registry = registry.with_stage::<ferron_http::HttpContext, _>(move || {
+            Arc::new(crate::log_export::LogExportStage)
+        });
         let state = Arc::clone(&self.state);
         let registry = registry.with_stage::<ferron_http::HttpContext, _>(move || {
             Arc::new(CloudflareIpStage::new(Arc::clone(&state)))

@@ -5,6 +5,7 @@ mod config_adapter;
 mod definition_source;
 mod geo;
 mod ipban;
+mod log_export;
 mod matched_log;
 mod module;
 mod request_source;
