@@ -24,11 +24,11 @@ thiserror = "2"
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 tokio = { version = "1", features = ["rt", "time", "macros"] }
 typemap_rev = "0.4"
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.42", features = ["bundled"] }
 
-ferron-core = { git = "https://github.com/ferronweb/ferron.git", rev = "eabdbdc2079e5c92a80c4cdb324a8d2d6094cc6d", version = "3.0.0-rc.10" }
-ferron-http = { git = "https://github.com/ferronweb/ferron.git", rev = "eabdbdc2079e5c92a80c4cdb324a8d2d6094cc6d", version = "3.0.0-rc.10" }
-ferron-observability = { git = "https://github.com/ferronweb/ferron.git", rev = "eabdbdc2079e5c92a80c4cdb324a8d2d6094cc6d", version = "3.0.0-rc.10" }
+ferron-core = { git = "https://github.com/ferronweb/ferron.git", rev = "63648d8c93d214f70686a0db72cfaec778f57156", version = "3.0.0-rc.11" }
+ferron-http = { git = "https://github.com/ferronweb/ferron.git", rev = "63648d8c93d214f70686a0db72cfaec778f57156", version = "3.0.0-rc.11" }
+ferron-observability = { git = "https://github.com/ferronweb/ferron.git", rev = "63648d8c93d214f70686a0db72cfaec778f57156", version = "3.0.0-rc.11" }
 
 [dev-dependencies]
 futures-executor = "0.3"

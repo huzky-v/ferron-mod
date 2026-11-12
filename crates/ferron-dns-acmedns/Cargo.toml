@@ -6,8 +6,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-ferron-core = { git = "https://github.com/ferronweb/ferron.git", rev = "eabdbdc2079e5c92a80c4cdb324a8d2d6094cc6d", version = "3.0.0-rc.10" }
-ferron-dns = { git = "https://github.com/ferronweb/ferron.git", rev = "eabdbdc2079e5c92a80c4cdb324a8d2d6094cc6d", version = "3.0.0-rc.10" }
+ferron-core = { git = "https://github.com/ferronweb/ferron.git", rev = "63648d8c93d214f70686a0db72cfaec778f57156", version = "3.0.0-rc.11" }
+ferron-dns = { git = "https://github.com/ferronweb/ferron.git", rev = "63648d8c93d214f70686a0db72cfaec778f57156", version = "3.0.0-rc.11" }
 async-trait = "0.1"
 reqwest = { version = "=0.13.5", default-features = false, features = ["json", "rustls"] }
 serde = { version = "1", features = ["derive"] }
