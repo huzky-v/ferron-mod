@@ -46,13 +46,16 @@ fn setting(config: &ServerConfigurationBlock, key: &str) -> Result<String, Strin
         .ok_or_else(|| format!("acme-dns requires nonempty `{key}`"))
 }
 
-fn endpoint_url(endpoint: &str) -> Result<Url, String> {
+fn endpoint_url(endpoint: &str, allow_http: bool) -> Result<Url, String> {
     let url = Url::parse(endpoint).map_err(|e| format!("invalid acme-dns endpoint: {e}"))?;
     if url.scheme() != "https"
         && !(url.scheme() == "http"
-            && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1")))
+            && (allow_http || matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))))
     {
-        return Err("acme-dns endpoint must use HTTPS (HTTP is only allowed on loopback)".into());
+        return Err(
+            "acme-dns endpoint must use HTTPS (HTTP requires `allow_http true` outside loopback)"
+                .into(),
+        );
     }
     if url.host_str().is_none()
         || !url.username().is_empty()
@@ -69,7 +72,16 @@ fn endpoint_url(endpoint: &str) -> Result<Url, String> {
 }
 
 fn client_from_config(config: &ServerConfigurationBlock) -> Result<AcmeDnsClient, String> {
-    let endpoint = endpoint_url(&setting(config, "endpoint")?)?;
+    let allow_http = config
+        .get_value("allow_http")
+        .map(|value| {
+            value
+                .as_boolean()
+                .ok_or_else(|| "acme-dns `allow_http` must be a boolean".to_string())
+        })
+        .transpose()?
+        .unwrap_or(false);
+    let endpoint = endpoint_url(&setting(config, "endpoint")?, allow_http)?;
     let username = setting(config, "username")?;
     let password = setting(config, "password")?;
     let subdomain = setting(config, "subdomain")?;
@@ -113,7 +125,13 @@ impl ConfigurationValidator for AcmeDnsValidator {
         config: &ServerConfigurationBlock,
         ctx: &mut ConfigurationValidatorContext,
     ) -> Result<(), ConfigurationValidationError> {
-        for key in ["endpoint", "username", "password", "subdomain"] {
+        for key in [
+            "endpoint",
+            "username",
+            "password",
+            "subdomain",
+            "allow_http",
+        ] {
             ctx.used_directives.insert(key.to_string());
         }
         client_from_config(config)
@@ -190,6 +208,7 @@ impl DnsClient for AcmeDnsClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferron_core::config::{ServerConfigurationDirectiveEntry, ServerConfigurationValue};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -302,7 +321,73 @@ mod tests {
         other.record_type = DnsRecordType::CNAME;
         let dns = client(Url::parse("http://127.0.0.1:1/").unwrap());
         assert!(dns.update_record(&other).await.is_err());
-        assert!(endpoint_url("http://example.org/").is_err());
-        assert!(endpoint_url("https://user:pass@example.org/").is_err());
+        assert!(endpoint_url("http://example.org/", false).is_err());
+        assert!(endpoint_url("https://user:pass@example.org/", false).is_err());
+    }
+
+    fn configuration(
+        endpoint: &str,
+        allow_http: Option<ServerConfigurationValue>,
+    ) -> ServerConfigurationBlock {
+        let mut config = ServerConfigurationBlock::default();
+        let values = [
+            ("endpoint", endpoint),
+            ("username", "user"),
+            ("password", "secret"),
+            ("subdomain", "registered-label"),
+        ];
+        let directives = Arc::make_mut(&mut config.directives);
+        for (key, value) in values {
+            directives.insert(
+                key.to_string(),
+                vec![ServerConfigurationDirectiveEntry {
+                    args: vec![ServerConfigurationValue::String(value.to_string(), None)],
+                    children: None,
+                    span: None,
+                }],
+            );
+        }
+        if let Some(value) = allow_http {
+            directives.insert(
+                "allow_http".into(),
+                vec![ServerConfigurationDirectiveEntry {
+                    args: vec![value],
+                    children: None,
+                    span: None,
+                }],
+            );
+        }
+        config
+    }
+
+    #[test]
+    fn http_requires_explicit_boolean_opt_in() {
+        let endpoint = "http://acme-dns:8080/";
+        assert!(client_from_config(&configuration(endpoint, None)).is_err());
+        assert!(
+            client_from_config(&configuration(
+                endpoint,
+                Some(ServerConfigurationValue::Boolean(false, None))
+            ))
+            .is_err()
+        );
+        assert!(
+            client_from_config(&configuration(
+                endpoint,
+                Some(ServerConfigurationValue::String("true".into(), None))
+            ))
+            .is_err()
+        );
+        assert!(
+            client_from_config(&configuration(
+                endpoint,
+                Some(ServerConfigurationValue::Boolean(true, None))
+            ))
+            .is_ok()
+        );
+        assert!(client_from_config(&configuration("https://auth.example.net/", None)).is_ok());
+        assert!(client_from_config(&configuration("http://localhost:8080/", None)).is_ok());
+        assert!(endpoint_url("ftp://acme-dns/", true).is_err());
+        assert!(endpoint_url("http://user:pass@acme-dns/", true).is_err());
     }
 }

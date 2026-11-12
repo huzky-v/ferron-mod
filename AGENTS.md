@@ -1,6 +1,6 @@
 # Ferron abuse protection
 
-- `crates/ferron-dns-acmedns` provides the in-process `acme-dns` DNS-01 provider. Registration is manual, one-time; configure its HTTPS endpoint and saved username/password/subdomain, and point each `_acme-challenge` CNAME at the registration's `fulldomain`. The provider updates TXT via `/update`; deletion is a no-op because acme-dns rotates two TXT values. See `docs/acme-dns.md`.
+- `crates/ferron-dns-acmedns` provides the in-process `acme-dns` DNS-01 provider. Registration is manual, one-time; configure its endpoint and saved username/password/subdomain, and point each `_acme-challenge` CNAME at the registration's `fulldomain`. HTTPS is required by default for non-loopback API endpoints; `allow_http true` explicitly permits HTTP for trusted, isolated Compose networks. The provider updates TXT via `/update`; deletion is a no-op because acme-dns rotates two TXT values. See `docs/acme-dns.md`.
 
 - `crates/abuse-core` owns the Ferron-independent ban policy and unmatched-banned audit records.
 - `crates/ferron-abuse-protection` adapts Ferron requests, stages, configuration, and log writers.

@@ -29,4 +29,13 @@ Ferron's `acme-dns` provider uses the acme-dns HTTP API directly, not a shell ho
    }
    ```
 
+   If acme-dns runs as another service on the same private Docker Compose network and its API only serves HTTP, explicitly opt in inside the `dns` block instead:
+
+   ```text
+   endpoint "http://acme-dns:8080/"
+   allow_http true
+   ```
+
+   Replace `acme-dns` and `8080` with your actual Compose service name and **internal API port**. The option defaults to `false`; without it, only HTTPS or HTTP on loopback is accepted. HTTP sends the acme-dns credentials unencrypted over the network: use it only on a trusted, isolated network. This setting affects the API connection, not the publicly reachable authoritative DNS service needed by the CA.
+
    Protect the configuration file (or use Ferron's configuration interpolation to supply secrets); persist Ferron's ACME certificate cache. For multiple distinct names requiring different acme-dns registrations, use corresponding separate TLS configurations; a single `dns` block uses one registration. Avoid issuing more than two simultaneous challenges through one registration, since acme-dns keeps only two TXT values. Ferron posts the DNS-01 TXT value to `/update` with `X-Api-User` and `X-Api-Key`, waits for propagation, then asks the CA to validate. Renewal reuses the same registration and CNAME automatically. The acme-dns API has no delete endpoint, so TXT cleanup is intentionally a no-op; later updates rotate the records. Failed API updates prevent the challenge from being marked ready. Check your acme-dns server's outbound allowlist, API availability, public DNS delegation and CNAME if issuance fails.

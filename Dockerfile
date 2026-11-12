@@ -41,9 +41,9 @@ RUN --mount=type=cache,id=ferron-cargo-registry,target=/usr/local/cargo/registry
     target="$(cat /tmp/rust-target)" && \
     bash docker/build-musl.sh "${target}" "/opt/sysroots/musl-${target}" /out
 
-# Small runtime with the sqlite3 CLI for inspecting the definitions database.
+# Small runtime with CA certificates for outbound HTTPS.
 FROM alpine:3.24.3 AS runtime-alpine
-RUN apk add --no-cache ca-certificates sqlite && \
+RUN apk add --no-cache ca-certificates && \
     addgroup -S -g 65532 ferron && adduser -S -D -H -u 65532 -G ferron ferron && \
     mkdir -p /etc/ferron /var/lib/ferron /var/log/ferron /var/www/static /var/cache/ferron-acme && \
     chown -R ferron:ferron /var/lib/ferron /var/log/ferron /var/cache/ferron-acme
