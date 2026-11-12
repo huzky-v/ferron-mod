@@ -1,5 +1,7 @@
 # Ferron abuse protection
 
+- `crates/ferron-dns-acmedns` provides the in-process `acme-dns` DNS-01 provider. Registration is manual, one-time; configure its HTTPS endpoint and saved username/password/subdomain, and point each `_acme-challenge` CNAME at the registration's `fulldomain`. The provider updates TXT via `/update`; deletion is a no-op because acme-dns rotates two TXT values. See `docs/acme-dns.md`.
+
 - `crates/abuse-core` owns the Ferron-independent ban policy and unmatched-banned audit records.
 - `crates/ferron-abuse-protection` adapts Ferron requests, stages, configuration, and log writers.
 - Global `ipban_mode` can operate without definition/ban settings. Its feed is fetched in the background into a bounded, immutable, shared IP set; successful updates replace the set, failures retain the last good set. The definitions allowlist, if loaded, wins over ipban; ipban runs before extban. `ipban_log` uses the existing best-effort bounded Apache-format writer.

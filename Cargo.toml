@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/abuse-core", "crates/ferron-abuse-bin", "crates/ferron-abuse-protection", "crates/ferron-dns-acmedns", "crates/ferron-text-errors"]
 resolver = "3"
 
 [workspace.package]

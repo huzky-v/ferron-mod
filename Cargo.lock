@@ -1039,6 +1039,7 @@ version = "0.1.0"
 dependencies = [
  "abuse-core",
  "ferron-abuse-protection",
+ "ferron-dns-acmedns",
  "ferron-entrypoint",
  "ferron-text-errors",
  "libc",
@@ -1157,6 +1158,19 @@ dependencies = [
  "async-trait",
  "ferron-core",
  "hickory-resolver",
+]
+
+[[package]]
+name = "ferron-dns-acmedns"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ferron-core",
+ "ferron-dns",
+ "reqwest",
+ "serde",
+ "tokio",
+ "url",
 ]
 
 [[package]]
@@ -4368,6 +4382,8 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
+ "serde",
+ "serde_json",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
