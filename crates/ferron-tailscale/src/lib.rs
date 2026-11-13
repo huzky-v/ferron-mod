@@ -2,7 +2,7 @@
 
 use ferron_core::config::{ServerConfiguration, ServerConfigurationBlock};
 use std::collections::{BTreeMap, HashMap};
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -13,6 +13,7 @@ use std::time::Instant;
 const MAX_RESPONSE: usize = 1024 * 1024;
 const STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 const CERT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const DEFAULT_LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Clone, Copy)]
 enum LocalApiOperation {
@@ -425,14 +426,17 @@ fn wait_for_cert_domains(
     }
 }
 
-fn up_args(node: &Node, socket: &std::path::Path, authkey: &str) -> Vec<String> {
-    vec![
+fn up_args(node: &Node, socket: &std::path::Path, authkey: Option<&str>) -> Vec<String> {
+    let mut args = vec![
         format!("--socket={}", socket.display()),
         "up".into(),
         format!("--hostname={}", node.machine),
         "--accept-dns=false".into(),
-        format!("--authkey={authkey}"),
-    ]
+    ];
+    if let Some(authkey) = authkey {
+        args.push(format!("--authkey={authkey}"));
+    }
+    args
 }
 
 fn set_args(node: &Node, socket: &std::path::Path) -> Vec<String> {
@@ -441,6 +445,115 @@ fn set_args(node: &Node, socket: &std::path::Path) -> Vec<String> {
         "set".into(),
         format!("--hostname={}", node.machine),
     ]
+}
+
+fn login_args(node: &Node, socket: &std::path::Path) -> Vec<String> {
+    up_args(node, socket, None)
+}
+
+/// Extracts an interactive authentication or machine-approval URL from a
+/// `tailscale up` output line.
+fn parse_login_url(line: &str) -> Option<&str> {
+    let start = line.find("https://login.tailscale.com/")?;
+    let rest = &line[start..];
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    Some(&rest[..end])
+}
+
+fn login_timeout() -> Result<Duration, String> {
+    let Some(raw) = std::env::var_os("TS_LOGIN_TIMEOUT") else {
+        return Ok(DEFAULT_LOGIN_TIMEOUT);
+    };
+    let seconds: u64 = raw
+        .to_string_lossy()
+        .trim()
+        .parse()
+        .map_err(|_| "invalid TS_LOGIN_TIMEOUT (expected seconds)".to_string())?;
+    if seconds == 0 {
+        return Err("invalid TS_LOGIN_TIMEOUT".into());
+    }
+    Ok(Duration::from_secs(seconds))
+}
+
+/// Interactive registration: run `tailscale up` without an auth key, print the
+/// authentication URL it emits to the operator log (stderr only; the URL is a
+/// quasi-credential and never enters returned errors or TLS background
+/// diagnostics), and wait for the browser login to complete. Remaining startup
+/// (CertDomains and Serve) is handled by the caller like any other login.
+fn login_interactive(
+    node: &Node,
+    socket: &std::path::Path,
+    child: &mut Child,
+) -> Result<(), String> {
+    let expected = format!("{}.{}.ts.net", node.machine, node.tailnet);
+    let timeout = login_timeout()?;
+    let mut login = Command::new("tailscale")
+        .args(login_args(node, socket))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not start tailscale login: {e}"))?;
+    // Drain both pipes concurrently, printing each URL as soon as it appears,
+    // so the login command can never block on a full pipe.
+    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let stdout = login.stdout.take();
+    let stderr = login.stderr.take();
+    let pipes: Vec<Box<dyn Read + Send>> = stdout
+        .map(|pipe| Box::new(pipe) as Box<dyn Read + Send>)
+        .into_iter()
+        .chain(stderr.map(|pipe| Box::new(pipe) as Box<dyn Read + Send>))
+        .collect();
+    let mut readers = Vec::with_capacity(pipes.len());
+    for pipe in pipes {
+        let seen = Arc::clone(&seen);
+        let expected = expected.clone();
+        readers.push(thread::spawn(move || {
+            for line in std::io::BufReader::new(pipe).lines() {
+                let Ok(line) = line else { break };
+                let Some(url) = parse_login_url(&line) else {
+                    continue;
+                };
+                let mut seen = seen.lock().expect("login URL list lock");
+                if !seen.iter().any(|seen| seen == url) {
+                    seen.push(url.to_string());
+                    drop(seen);
+                    eprintln!("tailscale: {expected} awaiting authentication; visit {url}");
+                }
+            }
+        }));
+    }
+    let deadline = Instant::now() + timeout;
+    let result = loop {
+        if !matches!(child.try_wait(), Ok(None)) {
+            break Err("tailscaled exited while waiting for interactive login".into());
+        }
+        match login.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                break Ok(());
+            }
+            Ok(Some(_)) => {
+                break Err("interactive login failed; the login URL, if any, was printed to the Ferron log".into());
+            }
+            Ok(None) => {}
+            Err(_) => {
+                break Err("could not check interactive login status".into());
+            }
+        }
+        if Instant::now() >= deadline {
+            break Err(format!(
+                "interactive login for {expected} did not complete within {}s; the login URL was printed to the Ferron log",
+                timeout.as_secs()
+            ));
+        }
+        thread::sleep(Duration::from_millis(250));
+    };
+    let _ = login.kill();
+    let _ = login.wait();
+    for reader in readers {
+        let _ = reader.join();
+    }
+    result
 }
 
 fn daemon_args(state_dir: &std::path::Path, socket: &std::path::Path) -> [String; 4] {
@@ -476,20 +589,24 @@ fn start_node(node: &Node) -> Result<Child, String> {
         }
         let current = status(&socket)?;
         if current["BackendState"] != "Running" {
-            let authkey = std::env::var("TS_AUTHKEY")
-                .map_err(|_| "TS_AUTHKEY required for tailscale up".to_string())?;
-            if authkey.is_empty() {
-                return Err("TS_AUTHKEY required for tailscale up".into());
-            }
             // Never pass auth keys to a shell, logs, or returned command errors.
             if std::env::var_os("TS_EXTRA_ARGS").is_some() {
                 return Err(
                     "TS_EXTRA_ARGS is unsupported; use a pre-authenticated state instead".into(),
                 );
             }
-            let mut cmd = Command::new("tailscale");
-            cmd.args(up_args(node, &socket, &authkey));
-            require_success(command_output(cmd)?)?;
+            let authkey = std::env::var("TS_AUTHKEY").unwrap_or_default();
+            if authkey.is_empty() {
+                // Interactive registration: surface the login URL to the
+                // operator log, then wait for the browser login to complete.
+                // The URL is a quasi-credential: it goes to stderr only,
+                // never into returned errors or TLS background diagnostics.
+                login_interactive(node, &socket, &mut child)?;
+            } else {
+                let mut cmd = Command::new("tailscale");
+                cmd.args(up_args(node, &socket, Some(&authkey)));
+                require_success(command_output(cmd)?)?;
+            }
         } else if verify_cert_domains(
             &current,
             &format!("{}.{}.ts.net", node.machine, node.tailnet),
@@ -960,7 +1077,7 @@ mod tests {
             socket: NodeSocket::Managed,
         };
         assert_eq!(
-            up_args(&node, std::path::Path::new("/run/a.sock"), "secret"),
+            up_args(&node, std::path::Path::new("/run/a.sock"), Some("secret")),
             [
                 "--socket=/run/a.sock",
                 "up",
@@ -970,8 +1087,26 @@ mod tests {
             ]
         );
         assert_eq!(
+            up_args(&node, std::path::Path::new("/run/a.sock"), None),
+            [
+                "--socket=/run/a.sock",
+                "up",
+                "--hostname=a",
+                "--accept-dns=false"
+            ]
+        );
+        assert_eq!(
             set_args(&node, std::path::Path::new("/run/a.sock")),
             ["--socket=/run/a.sock", "set", "--hostname=a"]
+        );
+        assert_eq!(
+            login_args(&node, std::path::Path::new("/run/a.sock")),
+            [
+                "--socket=/run/a.sock",
+                "up",
+                "--hostname=a",
+                "--accept-dns=false"
+            ]
         );
         let expected = "a.example.ts.net";
         let good = serde_json::json!({"BackendState":"Running", "Self":{"DNSName":"wrong.example.ts.net."}, "CertDomains":["A.Example.TS.NET."]});
@@ -994,6 +1129,48 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn login_url_parser_extracts_exact_url() {
+        assert_eq!(parse_login_url("\tTo authenticate, visit:\n"), None);
+        assert_eq!(
+            parse_login_url("\tTo authenticate, visit: https://login.tailscale.com/a/123abc"),
+            Some("https://login.tailscale.com/a/123abc")
+        );
+        assert_eq!(
+            parse_login_url("\t\t\thttps://login.tailscale.com/a/xyz789?nodekey=deadbeef\n"),
+            Some("https://login.tailscale.com/a/xyz789?nodekey=deadbeef")
+        );
+        assert_eq!(
+            parse_login_url(
+                "\tTo approve your machine, visit (as admin):\n\n\t\thttps://login.tailscale.com/a/admin-url"
+            ),
+            Some("https://login.tailscale.com/a/admin-url")
+        );
+        assert_eq!(parse_login_url("no url here"), None);
+        assert_eq!(
+            parse_login_url("noise https://login.tailscale.com/a/abc trailing words"),
+            Some("https://login.tailscale.com/a/abc")
+        );
+        assert_eq!(
+            parse_login_url("https://login.tailscale.com/a/only"),
+            Some("https://login.tailscale.com/a/only")
+        );
+        // URLs are exact: embedded in other hosts must not match.
+        assert_eq!(
+            parse_login_url("https://example.com/login.tailscale.com/a/x"),
+            None
+        );
+    }
+
+    #[test]
+    fn login_timeout_defaults_and_rejects_invalid() {
+        // Without TS_LOGIN_TIMEOUT set, the 300s default applies. Env-var
+        // branches are covered below under a shared lock because tests in
+        // this crate share the process environment.
+        let timeout = login_timeout().unwrap();
+        assert_eq!(timeout, DEFAULT_LOGIN_TIMEOUT);
     }
 
     #[test]

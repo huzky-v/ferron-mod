@@ -289,11 +289,26 @@ impl Shared {
                             Ok(Arc::new(certified))
                         },
                     );
+                    let host = format!("{}.{}.ts.net", job.node.machine, job.node.tailnet);
+                    if result.is_ok() {
+                        // Read before publish(): an existing key means this run renewed
+                        // the last-good certificate instead of acquiring the first one.
+                        let renewed = job
+                            .state
+                            .inner
+                            .read()
+                            .ok()
+                            .is_some_and(|status| status.key.is_some());
+                        eprintln!(
+                            "tailscale: {host} certificate {}",
+                            if renewed { "renewed" } else { "acquired" }
+                        );
+                    }
                     job.state.publish(result);
                     if let Some(shared) = weak_workers.upgrade()
                         && let Ok(mut active) = shared.active.lock()
                     {
-                        active.remove(&format!("{}.{}.ts.net", job.node.machine, job.node.tailnet));
+                        active.remove(&host);
                     }
                 }
             });

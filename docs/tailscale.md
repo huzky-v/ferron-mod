@@ -52,7 +52,7 @@ services:
   ferron:
     image: ferron-tailscale
     environment:
-      TS_AUTHKEY: ${TS_AUTHKEY}
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
       TS_FERRON_HTTPS_PORT: "8443"
     volumes:
       - ./ferron.conf:/etc/ferron/ferron.conf:ro
@@ -61,6 +61,17 @@ services:
 volumes:
   ts-state:
 ```
+
+`TS_AUTHKEY` may be omitted entirely. A fresh node then registers
+**interactively**: Ferron runs `tailscale up` without an auth key, prints the
+`https://login.tailscale.com/a/...` URL to its stderr (visible with
+`docker logs`), and waits up to five minutes (override with
+`TS_LOGIN_TIMEOUT` in seconds) for an operator to complete the browser login.
+The URL is a one-time credential, so it is written only to the container log,
+never to Ferron's error diagnostics. If the wait expires, provisioning fails
+and retries after 30 seconds with a fresh URL; interactive logins occupy one of
+the two provisioning workers. Because retries restart `tailscaled`, each
+attempt requires a new browser visit.
 
 Ferron's public HTTP/HTTPS and ACME listeners start immediately, without
 waiting for tailscaled or its certificates. Each ts.net TLS resolver initially
@@ -82,8 +93,10 @@ The Ferron process owns managed tailscaled children. Each node uses
 `/var/lib/tailscale`) and `TS_SOCKET_DIR/<machine>-<tailnet>.sock` (default
 `/var/run/tailscale`). Each per-node directory is passed as tailscaled's
 `--statedir` and stores both node state and its TLS certificate cache. Persist
-the state directory. If the node is not already Running, `TS_AUTHKEY` is
-required for `tailscale up --hostname=<machine> --accept-dns=false`. For an
+the state directory. If the node is not already Running and `TS_AUTHKEY` is
+set, Ferron runs `tailscale up --hostname=<machine> --accept-dns=false
+--authkey=<key>`. Without `TS_AUTHKEY`, Ferron runs the same command without a
+key and waits for interactive browser login (see above). For an
 already Running node with a persisted generated name, Ferron invokes
 `tailscale set --hostname=<machine>` to rename it. Before requesting a
 certificate, Ferron waits for Running status and an exact match
