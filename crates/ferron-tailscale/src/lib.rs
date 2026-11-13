@@ -100,7 +100,6 @@ pub fn managed_socket(machine: &str, tailnet: &str) -> PathBuf {
 
 /// Inventory only: no daemon startup, filesystem changes, or certificate requests.
 pub fn inventory(config: &ServerConfiguration) -> Result<BTreeMap<String, Node>, String> {
-    let mut tailnet: Option<String> = None;
     let mut nodes: BTreeMap<String, Node> = BTreeMap::new();
     for ports in config.ports.values() {
         for port in ports {
@@ -123,16 +122,6 @@ pub fn inventory(config: &ServerConfiguration) -> Result<BTreeMap<String, Node>,
                         "{host}: ts.net hosts must select `tls {{ provider tailscale }}`"
                     ));
                 }
-                if tailnet
-                    .as_ref()
-                    .is_some_and(|previous| previous != &current)
-                {
-                    return Err(format!(
-                        "Multiple tailnets configured: {} and {current}",
-                        tailnet.as_deref().unwrap_or_default()
-                    ));
-                }
-                tailnet = Some(current.clone());
                 let socket = selected
                     .and_then(|tls| tls.get_value("socket"))
                     .map(|value| {
@@ -172,11 +161,19 @@ pub fn inventory(config: &ServerConfiguration) -> Result<BTreeMap<String, Node>,
     Ok(nodes)
 }
 
-pub fn check_tailnet(config: &ServerConfiguration) -> Result<Option<String>, String> {
-    Ok(inventory(config)?
-        .values()
-        .next()
-        .map(|node| node.tailnet.clone()))
+/// Resolves the auth key for a tailnet: `TS_AUTHKEY_<TAILNET>` (uppercased) wins over
+/// the process-wide `TS_AUTHKEY`. Tailscale auth keys are scoped to a single tailnet,
+/// so distinct tailnets each need their own key. Returns an empty string when unset.
+fn authkey_for(tailnet: &str) -> String {
+    let specific = format!("TS_AUTHKEY_{}", tailnet.to_ascii_uppercase());
+    resolve_authkey(
+        std::env::var(&specific).ok(),
+        std::env::var("TS_AUTHKEY").ok(),
+    )
+}
+
+fn resolve_authkey(specific: Option<String>, fallback: Option<String>) -> String {
+    specific.or(fallback).unwrap_or_default()
 }
 
 /// Owns only the daemons it starts. Add-only on reload; dropping the final manager kills them.
@@ -595,7 +592,7 @@ fn start_node(node: &Node) -> Result<Child, String> {
                     "TS_EXTRA_ARGS is unsupported; use a pre-authenticated state instead".into(),
                 );
             }
-            let authkey = std::env::var("TS_AUTHKEY").unwrap_or_default();
+            let authkey = authkey_for(&node.tailnet);
             if authkey.is_empty() {
                 // Interactive registration: surface the login URL to the
                 // operator log, then wait for the browser login to complete.
@@ -832,7 +829,7 @@ mod tests {
     }
 
     #[test]
-    fn ts_net_hosts_require_tailscale_and_one_tailnet() {
+    fn ts_net_hosts_require_tailscale_provider() {
         let mut config = ServerConfiguration::default();
         let host = |name: &str, block| {
             (
@@ -853,23 +850,37 @@ mod tests {
                 )],
             }],
         );
-        assert!(check_tailnet(&config).unwrap_err().contains("must select"));
+        assert!(inventory(&config).unwrap_err().contains("must select"));
         config.global_config = Arc::new(tls_block("tailscale"));
-        assert!(check_tailnet(&config).unwrap_err().contains("must select"));
+        assert!(inventory(&config).unwrap_err().contains("must select"));
         config.ports.get_mut("http").unwrap()[0].hosts[0] =
             host("a.example.ts.net", tls_block("tailscale"));
-        assert_eq!(check_tailnet(&config).unwrap().as_deref(), Some("example"));
+        assert_eq!(inventory(&config).unwrap().len(), 1);
         config.ports.get_mut("http").unwrap()[0]
             .hosts
             .push(host("b.other.ts.net", tls_block("tailscale")));
-        assert!(
-            check_tailnet(&config)
-                .unwrap_err()
-                .contains("Multiple tailnets")
-        );
+        // Multiple tailnets are now supported; both nodes are inventoried.
+        assert_eq!(inventory(&config).unwrap().len(), 2);
         config.ports.get_mut("http").unwrap()[0].hosts[1] =
             host("b.example.ts.net", tls_block("acme"));
-        assert!(check_tailnet(&config).unwrap_err().contains("must select"));
+        assert!(inventory(&config).unwrap_err().contains("must select"));
+    }
+
+    #[test]
+    fn authkey_resolution_prefers_tailnet_specific_key() {
+        assert_eq!(
+            resolve_authkey(Some("dojo-key".into()), Some("shared-key".into())),
+            "dojo-key"
+        );
+        assert_eq!(
+            resolve_authkey(None, Some("shared-key".into())),
+            "shared-key"
+        );
+        assert_eq!(resolve_authkey(None, None), "");
+        assert_eq!(
+            resolve_authkey(Some(String::new()), Some("shared-key".into())),
+            ""
+        );
     }
     #[test]
     fn key_first_with_chain() {
@@ -1012,14 +1023,17 @@ mod tests {
                 .is_err()
             );
         }
-        assert!(
-            inventory(&config_with_hosts(vec![
-                host("a.example.ts.net", tls_block("tailscale")),
-                host("b.other.ts.net", tls_block("tailscale"))
-            ]))
-            .unwrap_err()
-            .contains("Multiple tailnets")
-        );
+        // Multiple tailnets coexist; each is inventoried separately.
+        let nodes = inventory(&config_with_hosts(vec![
+            host("a.example.ts.net", tls_block("tailscale")),
+            host("b.other.ts.net", tls_block("tailscale")),
+        ]))
+        .unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert!(nodes.contains_key("a.example.ts.net"));
+        assert!(nodes.contains_key("b.other.ts.net"));
+        assert_eq!(nodes["a.example.ts.net"].tailnet, "example");
+        assert_eq!(nodes["b.other.ts.net"].tailnet, "other");
     }
 
     #[test]

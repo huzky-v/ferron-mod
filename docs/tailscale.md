@@ -3,7 +3,7 @@
 The `runtime-tailscale` image runs one userspace tailscaled per distinct canonical
 `machine.tailnet.ts.net` host, with a private state file and LocalAPI socket for
 each machine. Enable MagicDNS and HTTPS certificates in the tailnet first. This
-allows separate `a` and `b` nodes in the **same** tailnet alongside public ACME:
+allows separate `a` and `b` nodes in the same tailnet alongside public ACME:
 
 ```conf
 {
@@ -27,11 +27,18 @@ www.example.com {
 }
 ```
 
+Hosts from **multiple tailnets** may be combined in one configuration; each gets
+its own daemon, state, and login. Tailscale auth keys are scoped to a single
+tailnet: set a per-tailnet key in `TS_AUTHKEY_<TAILNET>` (tailnet name
+uppercased, e.g. `TS_AUTHKEY_MY_TAILNET` for `my-tailnet.ts.net`), falling back
+to the process-wide `TS_AUTHKEY`. Without any key, each node falls back to
+interactive login and prints its own URL to the Ferron log.
+
 Every ts.net host **must** select a host-specific `tls { provider tailscale }`;
 a global TLS provider is never inherited for these hosts. Names must be exactly
 `machine.tailnet.ts.net`: malformed
-names, mismatched TLS providers, and multiple tailnets are rejected. Repeated
-instances of one machine share one daemon. A host-specific block such as
+names and mismatched TLS providers are rejected. Repeated instances of one
+machine share one daemon. A host-specific block such as
 
 ```conf
 tls {
@@ -53,6 +60,9 @@ services:
     image: ferron-tailscale
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
+      # Optional per-tailnet keys win over TS_AUTHKEY for that tailnet:
+      TS_AUTHKEY_MY_TAILNET: ${TS_AUTHKEY_MY_TAILNET:-}
+      TS_AUTHKEY_OTHER_TAILNET: ${TS_AUTHKEY_OTHER_TAILNET:-}
       TS_FERRON_HTTPS_PORT: "8443"
     volumes:
       - ./ferron.conf:/etc/ferron/ferron.conf:ro
@@ -62,8 +72,8 @@ volumes:
   ts-state:
 ```
 
-`TS_AUTHKEY` may be omitted entirely. A fresh node then registers
-**interactively**: Ferron runs `tailscale up` without an auth key, prints the
+Auth keys may be omitted entirely. A fresh node then registers
+**interactively**: Ferron runs `tailscale login`, prints the
 `https://login.tailscale.com/a/...` URL to its stderr (visible with
 `docker logs`), and waits up to five minutes (override with
 `TS_LOGIN_TIMEOUT` in seconds) for an operator to complete the browser login.
@@ -93,10 +103,11 @@ The Ferron process owns managed tailscaled children. Each node uses
 `/var/lib/tailscale`) and `TS_SOCKET_DIR/<machine>-<tailnet>.sock` (default
 `/var/run/tailscale`). Each per-node directory is passed as tailscaled's
 `--statedir` and stores both node state and its TLS certificate cache. Persist
-the state directory. If the node is not already Running and `TS_AUTHKEY` is
-set, Ferron runs `tailscale up --hostname=<machine> --accept-dns=false
---authkey=<key>`. Without `TS_AUTHKEY`, Ferron runs the same command without a
-key and waits for interactive browser login (see above). For an
+the state directory. If the node is not already Running and an auth key is
+available (`TS_AUTHKEY_<TAILNET>` for the node's tailnet if set, otherwise
+`TS_AUTHKEY`), Ferron runs `tailscale up --hostname=<machine> --accept-dns=false
+--authkey=<key>`. Without a key, Ferron runs `tailscale login` and waits for
+interactive browser login (see above). For an
 already Running node with a persisted generated name, Ferron invokes
 `tailscale set --hostname=<machine>` to rename it. Before requesting a
 certificate, Ferron waits for Running status and an exact match
