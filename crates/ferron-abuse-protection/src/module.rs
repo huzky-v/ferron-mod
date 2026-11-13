@@ -139,7 +139,9 @@ impl SharedState {
         } else {
             None
         };
-        let writer = if let Some(policy) = &policy {
+        let writer = if let Some(policy) = &policy
+            && !adapter.core.audit_log.as_os_str().is_empty()
+        {
             let file = open_audit_file(&adapter.core.audit_log).map_err(|e| e.to_string())?;
             Some(
                 spawn_audit_writer(
@@ -459,19 +461,22 @@ impl ModuleLoader for FerronAbuseProtectionModuleLoader {
             }
         }
         let (metric_sender, metric_receiver) = MetricEventSender::from_limits(&core_config.limits)?;
-        let audit_file = match open_audit_file(&core_config.audit_log) {
-            Ok(file) => file,
-            Err(error) => {
+        let audit_file = if core_config.audit_log.as_os_str().is_empty() {
+            None
+        } else {
+            Some(open_audit_file(&core_config.audit_log).map_err(|error| {
                 let _ = metric_sender.try_record(MetricEvent::AuditWriterError);
                 let _ = metric_sender.try_record(MetricEvent::DroppedAuditRecord);
                 ferron_core::log_error!("ferron abuse audit_log startup open failed: {}", error);
-                return Err(error.into());
-            }
+                error
+            })?)
         };
         let matched_file = matched_log.as_deref().map(open_audit_file).transpose()?;
         // Fail at startup for invalid log destinations even when a site has not received traffic.
         for (audit, matched) in &site_logs {
-            open_audit_file(audit)?;
+            if !audit.as_os_str().is_empty() {
+                open_audit_file(audit)?;
+            }
             if let Some(path) = matched {
                 open_audit_file(path)?;
             }
@@ -558,7 +563,7 @@ impl ModuleLoader for FerronAbuseProtectionModuleLoader {
         let state = Arc::new(SharedState {
             policy,
             disabled_audit_queue,
-            audit_file: Mutex::new(Some(audit_file)),
+            audit_file: Mutex::new(audit_file),
             matched_file: Mutex::new(matched_file),
             matched_log: Mutex::new(None),
             writer: Mutex::new(None),

@@ -346,14 +346,9 @@ impl ProtectionConfig {
                 "ban_duration must be positive and within max_ban_duration".to_owned(),
             ));
         }
-        if self.definitions_db.as_os_str().is_empty() {
+        if (self.ban_mode || self.honeypot_mode) && self.definitions_db.as_os_str().is_empty() {
             return Err(ConfigError::Invalid(
                 "definitions_db must not be empty".to_owned(),
-            ));
-        }
-        if self.audit_log.as_os_str().is_empty() {
-            return Err(ConfigError::Invalid(
-                "audit_log must not be empty".to_owned(),
             ));
         }
         if let Some(url) = &self.definitions_url

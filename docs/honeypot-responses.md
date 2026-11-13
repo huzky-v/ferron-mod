@@ -11,6 +11,10 @@ tracked legacy configuration example. Other global directives include
 `ban_mode`, `honeypot_mode`, `ban_duration`, and `audit_log`; the legacy source
 uses `definitions_db` and optionally `definitions_url` (an HTTPS startup
 source for definitions).
+Both modes default to false and `ban_duration` defaults to 15 minutes. When
+either mode is enabled, a nonempty `definitions_db` (or `definitions_bundle`)
+is required; otherwise an unset or empty database path loads no SQLite data.
+`audit_log` is optional: an unset or empty path disables the audit writer.
 
 ### ZIP bundle alternative
 

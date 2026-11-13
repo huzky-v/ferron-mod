@@ -195,9 +195,9 @@ pub fn extract_config(block: &ServerConfigurationBlock) -> Result<AdapterConfig,
             "legacy Ferron abuse directive `{legacy}` cannot be combined with ferron-abuse-protection"
         ));
     }
-    let ban_mode = required_bool(block, "ban_mode")?;
+    let ban_mode = optional_bool(block, "ban_mode")?.unwrap_or(false);
     let cloudflare = proxied_by(block)?;
-    let honeypot_mode = required_bool(block, "honeypot_mode")?;
+    let honeypot_mode = optional_bool(block, "honeypot_mode")?.unwrap_or(false);
     let wordpress_site = block
         .directives
         .contains_key("wordpress_site")
@@ -210,14 +210,18 @@ pub fn extract_config(block: &ServerConfigurationBlock) -> Result<AdapterConfig,
         .then(|| required_bool(block, "share_bans"))
         .transpose()?
         .unwrap_or(true);
-    let ban_duration = required_duration(block, "ban_duration")?;
+    let ban_duration = if block.has_directive("ban_duration") {
+        required_duration(block, "ban_duration")?
+    } else {
+        Duration::from_secs(15 * 60)
+    };
     let definitions_bundle = bundle_value(block).map_err(|error| error.to_string())?;
     let definitions_db = if definitions_bundle.is_some() {
         PathBuf::from(crate::bundle_source::DEFAULT_BUNDLE) // unused in bundle mode
     } else {
-        required_path(block, "definitions_db")?
+        optional_empty_path(block, "definitions_db")?
     };
-    let audit_log = required_path(block, "audit_log")?;
+    let audit_log = optional_empty_path(block, "audit_log")?;
     let definitions_url = if definitions_bundle.is_some() {
         None
     } else {
@@ -312,18 +316,11 @@ impl ConfigurationValidator for AbuseProtectionConfigurationValidator {
             validate_ipban_only(config).map_err(ConfigurationValidationError::from)?;
             return Ok(());
         }
-        for required in ["ban_mode", "honeypot_mode", "ban_duration", "audit_log"]
-            .into_iter()
-            .chain((bundle.is_none()).then_some("definitions_db"))
-        {
-            if !config.directives.contains_key(required) {
-                return Err(ConfigurationValidationError::from(format!(
-                    "missing required global directive `{required}`"
-                )));
+        for name in ["ban_mode", "honeypot_mode"] {
+            if config.has_directive(name) {
+                validate_bool(config, name)?;
             }
         }
-        validate_bool(config, "ban_mode")?;
-        validate_bool(config, "honeypot_mode")?;
         if config.directives.contains_key("wordpress_site") {
             validate_bool(config, "wordpress_site")?;
         }
@@ -333,23 +330,16 @@ impl ConfigurationValidator for AbuseProtectionConfigurationValidator {
         ban_extensions(config).map_err(ConfigurationValidationError::from)?;
         let honeypot_mode = config
             .get_value("honeypot_mode")
-            .and_then(|value| value.as_boolean())
-            .expect("honeypot_mode was validated as boolean");
-        let duration = config
-            .get_value("ban_duration")
-            .and_then(|value| value.as_duration())
-            .ok_or_else(|| {
-                ConfigurationValidationError::from("`ban_duration` must be a positive duration")
-            })?;
-        if duration.is_zero() {
-            return Err(ConfigurationValidationError::from(
-                "`ban_duration` must be positive",
-            ));
+            .and_then(|v| v.as_boolean())
+            == Some(true);
+        let ban_mode = config.get_value("ban_mode").and_then(|v| v.as_boolean()) == Some(true);
+        if config.has_directive("ban_duration") {
+            required_duration(config, "ban_duration")
+                .map_err(ConfigurationValidationError::from)?;
         }
-        for path_directive in ["audit_log", "matched_log"]
+        for path_directive in ["matched_log"]
             .into_iter()
             .filter(|name| config.directives.contains_key(*name))
-            .chain((bundle.is_none()).then_some("definitions_db"))
         {
             let value = config
                 .get_value(path_directive)
@@ -361,6 +351,23 @@ impl ConfigurationValidator for AbuseProtectionConfigurationValidator {
                     ))
                 })?;
             let _ = value;
+        }
+        for name in ["audit_log", "definitions_db"] {
+            if name == "definitions_db" && bundle.is_some() {
+                continue;
+            }
+            optional_empty_path(config, name).map_err(ConfigurationValidationError::from)?;
+        }
+        if bundle.is_none()
+            && (ban_mode || honeypot_mode)
+            && optional_empty_path(config, "definitions_db")
+                .map_err(ConfigurationValidationError::from)?
+                .as_os_str()
+                .is_empty()
+        {
+            return Err(ConfigurationValidationError::from(
+                "`definitions_db` is required when `ban_mode` or `honeypot_mode` is true",
+            ));
         }
         if bundle.is_none()
             && honeypot_mode
@@ -425,7 +432,10 @@ fn validate_site_directive(
         "ban_extensions" => ban_extensions(block)
             .map(|_| ())
             .map_err(ConfigurationValidationError::from),
-        "audit_log" | "matched_log" | "geo_log" => required_path(block, name)
+        "audit_log" => optional_empty_path(block, name)
+            .map(|_| ())
+            .map_err(ConfigurationValidationError::from),
+        "matched_log" | "geo_log" => required_path(block, name)
             .map(|_| ())
             .map_err(ConfigurationValidationError::from),
         "geo_block_asn" | "geo_block_country" | "geo_block_continent" => {
@@ -498,6 +508,13 @@ fn required_bool(block: &ServerConfigurationBlock, name: &str) -> Result<bool, S
         .ok_or_else(|| format!("missing or invalid `{name}`"))
 }
 
+fn optional_bool(block: &ServerConfigurationBlock, name: &str) -> Result<Option<bool>, String> {
+    block
+        .has_directive(name)
+        .then(|| required_bool(block, name))
+        .transpose()
+}
+
 fn required_duration(block: &ServerConfigurationBlock, name: &str) -> Result<Duration, String> {
     block
         .get_value(name)
@@ -520,6 +537,20 @@ fn optional_path(block: &ServerConfigurationBlock, name: &str) -> Result<Option<
         return Ok(None);
     }
     required_path(block, name).map(Some)
+}
+
+fn optional_empty_path(block: &ServerConfigurationBlock, name: &str) -> Result<PathBuf, String> {
+    let Some(value) = block.get_value(name) else {
+        return if block.has_directive(name) {
+            Err(format!("`{name}` must be a string"))
+        } else {
+            Ok(PathBuf::new())
+        };
+    };
+    value
+        .as_str()
+        .map(PathBuf::from)
+        .ok_or_else(|| format!("`{name}` must be a string"))
 }
 
 fn optional_string(block: &ServerConfigurationBlock, name: &str) -> Result<Option<String>, String> {

@@ -514,6 +514,74 @@ fn rejects_non_https_definition_url() {
 }
 
 #[test]
+fn optional_protection_settings_default_to_disabled() {
+    let validate = validate_global;
+    let settings = block(&[]);
+    let config = extract_config(&settings).unwrap();
+    assert!(!config.core.ban_mode);
+    assert!(!config.core.honeypot_mode);
+    assert_eq!(config.core.ban_duration.as_secs(), 900);
+    assert!(config.core.definitions_db.as_os_str().is_empty());
+    assert!(config.core.audit_log.as_os_str().is_empty());
+    assert!(validate(&[], true).0.is_ok());
+
+    let empty_paths = [
+        (
+            "definitions_db",
+            ServerConfigurationValue::String(String::new(), None),
+        ),
+        (
+            "audit_log",
+            ServerConfigurationValue::String(String::new(), None),
+        ),
+    ];
+    assert!(extract_config(&block(&empty_paths)).is_ok());
+    assert!(validate(&empty_paths, true).0.is_ok());
+}
+
+#[test]
+fn enabled_protection_requires_definitions_but_not_audit_log() {
+    let validate = validate_global;
+    for mode in ["ban_mode", "honeypot_mode"] {
+        let mut settings = vec![(mode, ServerConfigurationValue::Boolean(true, None))];
+        if mode == "honeypot_mode" {
+            settings.push((
+                "honeypot_templates_dir",
+                ServerConfigurationValue::String("/catalog".into(), None),
+            ));
+        }
+        assert!(extract_config(&block(&settings)).is_err());
+        assert!(validate(&settings, true).0.is_err());
+        settings.push((
+            "definitions_db",
+            ServerConfigurationValue::String("definitions.sqlite".into(), None),
+        ));
+        assert!(extract_config(&block(&settings)).is_ok());
+        assert!(validate(&settings, true).0.is_ok());
+    }
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn validate_global(
+    settings: &[(&str, ServerConfigurationValue)],
+    is_global: bool,
+) -> (
+    Result<(), ferron_core::config::validator::ConfigurationValidationError>,
+    ConfigurationValidatorContext,
+) {
+    let mut context = ConfigurationValidatorContext {
+        used_directives: Default::default(),
+        is_global,
+        scoped_validators: Arc::new(Default::default()),
+        diagnostics: vec![],
+        scope: None,
+    };
+    let result =
+        AbuseProtectionConfigurationValidator.validate_block(&block(settings), &mut context);
+    (result, context)
+}
+
+#[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn bundle_config_overrides_legacy_sources_and_is_global_only() {
     let mut registry = DirectiveRegistry::new();

@@ -16,6 +16,43 @@ use tempfile::TempDir;
 static LIVE_SERVER_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
+fn live_optional_protection_paths_do_not_load_sqlite_or_create_audit_log() {
+    let _server_guard = LIVE_SERVER_LOCK.lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let upstream = Upstream::start();
+    let port = free_port();
+    fs::write(
+        temp.path().join("ferron.conf"),
+        format!(
+            "{{\n log \"{0}/access.log\"\n error_log \"{0}/error.log\"\n definitions_db \"\"\n audit_log \"\"\n}}\n*:{1} {{\n proxy http://{2}/\n}}\n",
+            temp.path().display(),
+            port,
+            upstream.address,
+        ),
+    )
+    .unwrap();
+    let child = Command::new(env!("CARGO_BIN_EXE_ferron"))
+        .current_dir(temp.path())
+        .args(["run", "-c", "ferron.conf"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut process = FerronProcess {
+        child: Some(child),
+        temp,
+        upstream: Some(upstream),
+        listen_port: port,
+        audit: PathBuf::new(),
+    };
+    process.wait_ready();
+    assert_eq!(process.request("/normal").0, 200);
+    assert!(!process.temp.path().join("definitions.sqlite").exists());
+    assert!(!process.temp.path().join("audit.ndjson").exists());
+    process.graceful_shutdown();
+}
+
+#[test]
 fn live_ipban_starts_without_definitions_and_keeps_serving_when_feed_is_unavailable() {
     let _server_guard = LIVE_SERVER_LOCK.lock().unwrap();
     let temp = tempfile::tempdir().unwrap();
