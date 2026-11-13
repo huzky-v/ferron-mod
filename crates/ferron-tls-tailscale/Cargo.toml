@@ -1,0 +1,19 @@
+[package]
+name = "ferron-tls-tailscale"
+version = "0.1.0"
+description = "TLS certificate provider backed by tailscaled LocalAPI"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ferron-core = { git = "https://github.com/ferronweb/ferron.git", rev = "63648d8c93d214f70686a0db72cfaec778f57156", version = "3.0.0-rc.11" }
+ferron-tls = { git = "https://github.com/ferronweb/ferron.git", rev = "63648d8c93d214f70686a0db72cfaec778f57156", version = "3.0.0-rc.11" }
+ferron-tailscale = { path = "../ferron-tailscale" }
+async-trait = "0.1"
+rustls = { version = "0.23", default-features = false, features = ["tls12", "std", "aws_lc_rs"] }
+rustls-pki-types = "1"
+tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+rcgen = "0.14"

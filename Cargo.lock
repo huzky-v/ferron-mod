@@ -1002,9 +1002,11 @@ version = "0.1.0"
 dependencies = [
  "abuse-core",
  "ferron-abuse-protection",
+ "ferron-core",
  "ferron-dns-acmedns",
  "ferron-entrypoint",
  "ferron-text-errors",
+ "ferron-tls-tailscale",
  "libc",
  "rusqlite",
  "serde_json",
@@ -1955,6 +1957,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferron-tailscale"
+version = "0.1.0"
+dependencies = [
+ "ferron-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ferron-text-errors"
 version = "0.1.0"
 dependencies = [
@@ -2100,6 +2111,20 @@ dependencies = [
  "ferron-tls",
  "rustls",
  "rustls-pki-types",
+]
+
+[[package]]
+name = "ferron-tls-tailscale"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "ferron-core",
+ "ferron-tailscale",
+ "ferron-tls",
+ "rcgen",
+ "rustls",
+ "rustls-pki-types",
+ "tokio",
 ]
 
 [[package]]

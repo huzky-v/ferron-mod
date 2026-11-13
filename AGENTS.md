@@ -1,5 +1,7 @@
 # Ferron abuse protection
 
+- `crates/ferron-tailscale` inventories canonical machine.tailnet.ts.net hosts and owns one userspace tailscaled per managed machine; `crates/ferron-tls-tailscale` installs an initially empty dynamic TLS resolver. Public listeners start without waiting for node startup or certificate issuance; a bounded background worker pool provisions nodes, and pending/failed ts.net handshakes have no certificate. Host-specific explicit sockets are external/unmanaged. Only one tailnet is allowed, and each node may request certificates only for its own authorized identity. `runtime-tailscale` configures raw TCP Serve forwarding from tailnet port 443 to Ferron's HTTPS listener (`TS_FERRON_HTTPS_PORT`, default 8443). Reloads are add-only: restart to remove or change nodes. No automatic certificate refresh. Userspace networking does not route Ferron's outbound traffic to tailnet peers automatically. See `docs/tailscale.md`.
+
 - `crates/ferron-dns-acmedns` provides the in-process `acme-dns` DNS-01 provider. Registration is manual, one-time; configure its endpoint and saved username/password/subdomain, and point each `_acme-challenge` CNAME at the registration's `fulldomain`. HTTPS is required by default for non-loopback API endpoints; `allow_http true` explicitly permits HTTP for trusted, isolated Compose networks. The provider updates TXT via `/update`; deletion is a no-op because acme-dns rotates two TXT values. See `docs/acme-dns.md`.
 
 - `crates/abuse-core` owns the Ferron-independent ban policy and unmatched-banned audit records.

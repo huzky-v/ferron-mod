@@ -53,24 +53,23 @@ EXPOSE 8080 8443
 ENTRYPOINT ["/usr/local/bin/ferron"]
 CMD ["run", "--config", "/etc/ferron/ferron.conf"]
 
-# Static binaries also work in a minimal runtime without a shell.
-FROM gcr.io/distroless/static-debian13:nonroot AS runtime-distroless
-COPY --from=builder /out/ferron /out/ferron-fmt /out/ferron-kdl2ferron /out/ferron-passwd /out/ferron-precompress /out/ferron-serve /usr/local/bin/
-COPY --from=runtime-alpine /etc/ferron /etc/ferron
-COPY --from=runtime-alpine /var/www/static /var/www/static
-COPY --from=runtime-alpine --chown=65532:65532 /var/lib/ferron /var/lib/ferron
-COPY --from=runtime-alpine --chown=65532:65532 /var/log/ferron /var/log/ferron
-COPY --from=runtime-alpine --chown=65532:65532 /var/cache/ferron-acme /var/cache/ferron-acme
-USER 65532:65532
-EXPOSE 8080 8443
-ENTRYPOINT ["/usr/local/bin/ferron"]
-CMD ["run", "--config", "/etc/ferron/ferron.conf"]
-
 # One-shot schema initializer; sqlite3 also lets operators manage DB rows.
 FROM alpine:3.24.3 AS definitions-init
 RUN apk add --no-cache sqlite && mkdir -p /var/lib/ferron
 COPY --from=builder /out/abuse-definitions-init /usr/local/bin/abuse-definitions-init
 ENTRYPOINT ["/usr/local/bin/abuse-definitions-init"]
+
+# Embedded userspace tailscaled; raw TCP Serve forwards tailnet :443 to Ferron.
+FROM runtime-alpine AS runtime-tailscale
+USER root
+RUN apk add --no-cache tailscale && \
+    mkdir -p /var/lib/tailscale /var/run/tailscale && \
+    chown -R ferron:ferron /var/lib/tailscale /var/run/tailscale
+COPY --chmod=0755 docker/tailscale/entrypoint.sh /usr/local/bin/ferron-tailscale-entrypoint
+USER ferron
+EXPOSE 8080 8443
+ENTRYPOINT ["/usr/local/bin/ferron-tailscale-entrypoint"]
+CMD ["run", "--config", "/etc/ferron/ferron.conf"]
 
 # Default image for `docker build .`.
 FROM runtime-alpine

@@ -1,0 +1,12 @@
+[package]
+name = "ferron-tailscale"
+version = "0.1.0"
+description = "Tailnet configuration checks and tailscaled LocalAPI client"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ferron-core = { git = "https://github.com/ferronweb/ferron.git", rev = "63648d8c93d214f70686a0db72cfaec778f57156", version = "3.0.0-rc.11" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
