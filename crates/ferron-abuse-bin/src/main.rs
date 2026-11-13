@@ -5,10 +5,13 @@ fn main() {
         ferron_tls_tailscale::TlsTailscaleModuleLoader::default(),
     )];
     loaders.extend(ferron_entrypoint::default_profile());
-    loaders.push(Box::new(
-        ferron_abuse_protection::FerronAbuseProtectionModuleLoader::default(),
-    ));
-    loaders.push(Box::new(ferron_text_errors::FerronTextErrorsModuleLoader));
-    loaders.push(Box::new(ferron_dns_acmedns::AcmeDnsModuleLoader));
+    #[cfg(feature = "full")]
+    {
+        loaders.push(Box::new(
+            ferron_abuse_protection::FerronAbuseProtectionModuleLoader::default(),
+        ));
+        loaders.push(Box::new(ferron_text_errors::FerronTextErrorsModuleLoader));
+        loaders.push(Box::new(ferron_dns_acmedns::AcmeDnsModuleLoader));
+    }
     ferron_entrypoint::main(loaders);
 }

@@ -131,6 +131,17 @@ cd "${PROJECT_ROOT}"
 
 mkdir -p "${OUT_DIR}"
 
+if [[ "${BUILD_VARIANT:-full}" == "tailscale" ]]; then
+	cargo build --release --locked --target "${TARGET}" \
+		-p ferron-abuse-bin --bin ferron --no-default-features
+	cp -f "${PROJECT_ROOT}/target/${TARGET}/release/ferron" "${OUT_DIR}/ferron"
+	if command -v "${STRIP:-llvm-strip}" >/dev/null 2>&1; then
+		"${STRIP:-llvm-strip}" --strip-all "${OUT_DIR}/ferron"
+	fi
+	echo "[INFO] Built Tailscale-only ${OUT_DIR}/ferron"
+	exit 0
+fi
+
 cargo build --release --locked --target "${TARGET}" \
 	-p ferron-abuse-bin --bin ferron
 

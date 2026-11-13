@@ -21,12 +21,13 @@ RUN case "${TARGETARCH}" in \
     rustup target add "${target}" && \
     printf '%s' "${target}" > /tmp/rust-target
 
-RUN git clone --filter=blob:none https://github.com/ferronweb/ferron.git /ferron-src && \
-    git -C /ferron-src checkout "${FERRON_REV}"
-
 COPY docker/cross-build/prepare-musl.sh /tmp/prepare-musl.sh
 RUN target="$(cat /tmp/rust-target)" && \
     bash /tmp/prepare-musl.sh -o /opt/sysroots "${target}"
+
+FROM builder AS builder-full
+RUN git clone --filter=blob:none https://github.com/ferronweb/ferron.git /ferron-src && \
+    git -C /ferron-src checkout "${FERRON_REV}"
 
 WORKDIR /src
 COPY . .
@@ -41,13 +42,24 @@ RUN --mount=type=cache,id=ferron-cargo-registry,target=/usr/local/cargo/registry
     target="$(cat /tmp/rust-target)" && \
     bash docker/build-musl.sh "${target}" "/opt/sysroots/musl-${target}" /out
 
+FROM builder AS builder-tailscale
+WORKDIR /src
+COPY . .
+RUN --mount=type=cache,id=ferron-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=ferron-cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=ferron-target-${TARGETARCH},target=/src/target,sharing=locked \
+    target="$(cat /tmp/rust-target)" && \
+    BUILD_VARIANT=tailscale bash docker/build-musl.sh "${target}" "/opt/sysroots/musl-${target}" /out
+
 # Small runtime with CA certificates for outbound HTTPS.
-FROM alpine:3.24.3 AS runtime-alpine
+FROM alpine:3.24.3 AS runtime-base
 RUN apk add --no-cache ca-certificates && \
     addgroup -S -g 65532 ferron && adduser -S -D -H -u 65532 -G ferron ferron && \
     mkdir -p /etc/ferron /var/lib/ferron /var/log/ferron /var/www/static /var/cache/ferron-acme && \
     chown -R ferron:ferron /var/lib/ferron /var/log/ferron /var/cache/ferron-acme
-COPY --from=builder /out/ferron /out/ferron-fmt /out/ferron-kdl2ferron /out/ferron-passwd /out/ferron-precompress /out/ferron-serve /usr/local/bin/
+
+FROM runtime-base AS runtime-alpine
+COPY --from=builder-full /out/ferron /out/ferron-fmt /out/ferron-kdl2ferron /out/ferron-passwd /out/ferron-precompress /out/ferron-serve /usr/local/bin/
 USER ferron
 ENTRYPOINT ["/usr/local/bin/ferron"]
 CMD ["run", "--config", "/etc/ferron/ferron.conf"]
@@ -55,7 +67,7 @@ CMD ["run", "--config", "/etc/ferron/ferron.conf"]
 # One-shot schema initializer; sqlite3 also lets operators manage DB rows.
 FROM alpine:3.24.3 AS definitions-init
 RUN apk add --no-cache sqlite && mkdir -p /var/lib/ferron
-COPY --from=builder /out/abuse-definitions-init /usr/local/bin/abuse-definitions-init
+COPY --from=builder-full /out/abuse-definitions-init /usr/local/bin/abuse-definitions-init
 ENTRYPOINT ["/usr/local/bin/abuse-definitions-init"]
 
 # Official static Tailscale binaries.
@@ -78,8 +90,9 @@ RUN apk add --no-cache ca-certificates && \
     chmod 0755 /out-bin/tailscale /out-bin/tailscaled
 
 # Embedded userspace tailscaled; raw TCP Serve forwards tailnet :443 to Ferron.
-FROM runtime-alpine AS runtime-tailscale
+FROM runtime-base AS runtime-tailscale
 USER root
+COPY --from=builder-tailscale /out/ferron /usr/local/bin/ferron
 COPY --from=tailscale-fetch /out-bin/tailscale /out-bin/tailscaled /usr/local/bin/
 RUN mkdir -p /var/lib/tailscale /var/run/tailscale && \
     chown -R ferron:ferron /var/lib/tailscale /var/run/tailscale

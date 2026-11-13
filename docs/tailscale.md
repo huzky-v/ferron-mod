@@ -52,6 +52,13 @@ stops it. Explicit sockets win over inferred sockets for the same host; two
 different explicit sockets conflict.
 
 Build with `docker build --target runtime-tailscale -t ferron-tailscale .`.
+This target compiles the existing Ferron entrypoint with `--no-default-features`:
+the upstream default profile and the Tailscale TLS integration only. It does
+not register this repository's abuse protection, acme-dns, or text-error modules,
+and does not ship the definition initializer or Ferron companion utilities.
+The default image remains the full ferron-mod build with those integrations.
+Tailscale hosts still need
+`tls { provider tailscale }` in their configuration.
 Example Compose deployment:
 
 ```yaml

@@ -10,10 +10,14 @@ rust-version.workspace = true
 name = "ferron"
 path = "src/main.rs"
 
+[features]
+default = ["full"]
+full = ["dep:ferron-abuse-protection", "dep:ferron-text-errors", "dep:ferron-dns-acmedns"]
+
 [dependencies]
-ferron-abuse-protection = { path = "../ferron-abuse-protection" }
-ferron-text-errors = { path = "../ferron-text-errors" }
-ferron-dns-acmedns = { path = "../ferron-dns-acmedns" }
+ferron-abuse-protection = { path = "../ferron-abuse-protection", optional = true }
+ferron-text-errors = { path = "../ferron-text-errors", optional = true }
+ferron-dns-acmedns = { path = "../ferron-dns-acmedns", optional = true }
 ferron-tls-tailscale = { path = "../ferron-tls-tailscale" }
 ferron-core = { git = "https://github.com/ferronweb/ferron.git", rev = "63648d8c93d214f70686a0db72cfaec778f57156", version = "3.0.0-rc.11" }
 ferron-entrypoint = { git = "https://github.com/ferronweb/ferron.git", rev = "63648d8c93d214f70686a0db72cfaec778f57156", version = "3.0.0-rc.11", features = ["profile-default"] }
