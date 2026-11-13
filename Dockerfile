@@ -49,7 +49,6 @@ RUN apk add --no-cache ca-certificates && \
     chown -R ferron:ferron /var/lib/ferron /var/log/ferron /var/cache/ferron-acme
 COPY --from=builder /out/ferron /out/ferron-fmt /out/ferron-kdl2ferron /out/ferron-passwd /out/ferron-precompress /out/ferron-serve /usr/local/bin/
 USER ferron
-EXPOSE 8080 8443
 ENTRYPOINT ["/usr/local/bin/ferron"]
 CMD ["run", "--config", "/etc/ferron/ferron.conf"]
 
@@ -59,15 +58,33 @@ RUN apk add --no-cache sqlite && mkdir -p /var/lib/ferron
 COPY --from=builder /out/abuse-definitions-init /usr/local/bin/abuse-definitions-init
 ENTRYPOINT ["/usr/local/bin/abuse-definitions-init"]
 
+# Official static Tailscale binaries.
+# Alpine 3.24's apk tailscale (1.98.x) lags upstream security releases, and
+# userspace networking needs only these two static binaries at runtime.
+# Bump TAILSCALE_VERSION when updating; see https://pkgs.tailscale.com/stable/
+FROM alpine:3.24.3 AS tailscale-fetch
+ARG TARGETARCH
+ARG TAILSCALE_VERSION=1.104.7
+RUN apk add --no-cache ca-certificates && \
+    case "${TARGETARCH}" in \
+      amd64) ts_arch=amd64 ;; \
+      arm64) ts_arch=arm64 ;; \
+      *) echo "Unsupported architecture for Tailscale: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    wget -O /tmp/tailscale.tgz "https://pkgs.tailscale.com/stable/tailscale_${TAILSCALE_VERSION}_${ts_arch}.tgz" && \
+    mkdir -p /tmp/ts /out-bin && \
+    tar -xzf /tmp/tailscale.tgz -C /tmp/ts --strip-components=1 && \
+    cp /tmp/ts/tailscale /tmp/ts/tailscaled /out-bin/ && \
+    chmod 0755 /out-bin/tailscale /out-bin/tailscaled
+
 # Embedded userspace tailscaled; raw TCP Serve forwards tailnet :443 to Ferron.
 FROM runtime-alpine AS runtime-tailscale
 USER root
-RUN apk add --no-cache tailscale && \
-    mkdir -p /var/lib/tailscale /var/run/tailscale && \
+COPY --from=tailscale-fetch /out-bin/tailscale /out-bin/tailscaled /usr/local/bin/
+RUN mkdir -p /var/lib/tailscale /var/run/tailscale && \
     chown -R ferron:ferron /var/lib/tailscale /var/run/tailscale
 COPY --chmod=0755 docker/tailscale/entrypoint.sh /usr/local/bin/ferron-tailscale-entrypoint
 USER ferron
-EXPOSE 8080 8443
 ENTRYPOINT ["/usr/local/bin/ferron-tailscale-entrypoint"]
 CMD ["run", "--config", "/etc/ferron/ferron.conf"]
 
